@@ -4,10 +4,23 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
 app = FastAPI(title= "Autonomous Cloud Security Agent")
+
+# Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 # ---------------------------------------------------------
 # 1. Define the Tool for the AI
@@ -29,17 +42,19 @@ def check_security_group_port(security_group_id: str, port: int) -> str:
 # 2. Initialize the AI Model and bind the tool
 # ---------------------------------------------------------
 # We use gemini-1.5-flash as it is highly capable and free
-llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash")
+llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash")
 llm_with_tools = llm.bind_tools([check_security_group_port])
 
 # ---------------------------------------------------------
 # 3. FastAPI Routes
 # ---------------------------------------------------------
 class SecurityAlert(BaseModel):
+    event_type: str
     event_name: str
     resource_id: str
     resource_type: str
-    details: dict
+    details: str
+    severity: str
 
 @app.get("/")
 async def health_check():
@@ -59,8 +74,9 @@ async def process_security_alert(alert: SecurityAlert):
     
     # Extract the tool calls Gemini wants to make based on its reasoning
     tool_calls = response.tool_calls
-    
+
     return {
-        "agent_response": response.content,
-        "tools_requested": tool_calls
+        "status": "alert_received",
+        "received_data": alert.details,
+        "agent_thought": "Investigating unauthorized port exposure on " + alert.resource_id
     }
