@@ -5,10 +5,10 @@ function App() {
   const [agentThoughts, setAiThoughts] = useState("");
   const [status, setStatus] = useState("Idle");
 
-  // Simulated trigger alert function
+  // Simulated trigger alert function with Real-Time SSE Streaming
   const triggerSimulatedAlert = async () => {
-    setStatus("Alert Triggered - Contacting AI...");
-    setAiThoughts("Sending alert to backend. Awaiting agent reasoning...");
+    setStatus("Connecting Stream...");
+    setAiThoughts("");
     
     const payload = {
       event_type: "UNAUTHORIZED_PORT_OPEN",
@@ -22,7 +22,7 @@ function App() {
     setAlert(payload);
 
     try {
-      const response = await fetch("http://localhost:8000/webhook/aws-alert", {
+      const response = await fetch("http://localhost:8000/webhook/aws-alert/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -34,22 +34,70 @@ function App() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      // Dump the raw JSON response into our thought stream window for now
-      setAiThoughts(JSON.stringify(data, null, 2));
-      setStatus("AI Response Received");
-      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lineGroups = buffer.split("\n\n");
+        // Keep the last incomplete block in the buffer
+        buffer = lineGroups.pop();
+
+        for (const group of lineGroups) {
+          const line = group.trim();
+          if (line.startsWith("data: ")) {
+            try {
+              const eventData = JSON.parse(line.slice(6));
+              if (eventData.type === 'status') {
+                setStatus(eventData.content);
+              } else if (eventData.type === 'thought' || eventData.type === 'chunk') {
+                setAiThoughts((prev) => prev + eventData.content);
+              } else if (eventData.type === 'done') {
+                setStatus("Stream Finished");
+                setAiThoughts((prev) => prev + eventData.content);
+              }
+            } catch (e) {
+              console.error("Error parsing SSE line:", e);
+            }
+          }
+        }
+      }
     } catch (error) {
       console.error("Connection Error:", error);
-      setAiThoughts("Error connecting to Python backend. Is FastAPI running?");
+      setAiThoughts("Error connecting to Python backend stream. Is FastAPI running?");
       setStatus("Connection Failed");
     }
   };
 
-  const handleApproveRemediation = () => {
-    setStatus("Remediation Approved");
-    setAiThoughts((prev) => prev + "\n[Action Approved] Executing AWS Security Group fix...");
+  const handleApproveRemediation = async () => {
+    setStatus("Executing Remediation...");
+    setAiThoughts((prev) => prev + "\n\n[HUMAN APPROVAL GRANTED] Dispatching remediation command to AWS orchestrator...");
+
+    try {
+      const response = await fetch("http://localhost:8000/webhook/approve-remediation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resource_id: alert?.resource_id || "sg-0123456789abcdef0" }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setAiThoughts((prev) => prev + `\n[AWS BOTO3 SUCCESS] ${data.message}\n[POSTURE VERIFIED] Security Group ${data.resource_id} is now SECURE & COMPLIANT.`);
+      setStatus("Remediation Executed");
+    } catch (error) {
+      console.error("Remediation Error:", error);
+      setAiThoughts((prev) => prev + "\n[ERROR] Failed to execute remediation request on backend.");
+      setStatus("Remediation Error");
+    }
   };
 
   return (
