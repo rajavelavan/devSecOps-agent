@@ -1,9 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+
+interface Alert {
+  event_type: string;
+  event_name: string;
+  resource_id: string;
+  resource_type: string;
+  details: string;
+  severity: string;
+}
 
 function App() {
-  const [alert, setAlert] = useState(null);
-  const [agentThoughts, setAiThoughts] = useState("");
-  const [status, setStatus] = useState("Idle");
+  const [alert, setAlert] = useState<Alert | null>(null);
+  const [agentThoughts, setAiThoughts] = useState<string>("");
+  const [status, setStatus] = useState<string>("Idle");
 
   // Simulated trigger alert function with Real-Time SSE Streaming
   const triggerSimulatedAlert = async () => {
@@ -34,6 +43,9 @@ function App() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
+      if (!response.body) {
+        throw new Error("Response body is null");
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -45,7 +57,7 @@ function App() {
         buffer += decoder.decode(value, { stream: true });
         const lineGroups = buffer.split("\n\n");
         // Keep the last incomplete block in the buffer
-        buffer = lineGroups.pop();
+        buffer = lineGroups.pop() || "";
 
         for (const group of lineGroups) {
           const line = group.trim();
