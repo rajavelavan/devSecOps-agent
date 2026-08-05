@@ -1,23 +1,11 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
+# OS artifacts
+.DS_Store
 
-# Environment variables — NEVER commit secrets
-.env
-.env.*
-
-# Virtual environments
+# Root Virtual environments
+env/
 .venv/
 venv/
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-
-# Node (frontend)
-node_modules/
-
-# OS artifacts
-.DS_Store
+# Editor directories and files
+.vscode/
+.idea/
