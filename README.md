@@ -35,18 +35,18 @@ To run the application locally, you will need to start both the backend server a
    ```
 
 2. **Activate the virtual environment**:
-   *Note: An environment named `env-0.0` already exists in this project.*
+   *Note: An environment named `.venv` already exists in this project.*
    ```bash
    # On macOS/Linux
-   source env-0.0/bin/activate
+   source .venv/bin/activate
    # On Windows
-   .\env-0.0\Scripts\activate
+   .\.venv\Scripts\activate
    ```
 
 3. **Install Dependencies** (if not already installed):
    Ensure you have the required packages installed:
    ```bash
-   pip install fastapi uvicorn pydantic python-dotenv langchain-core langchain-google-genai
+   pip install -r requirements.txt
    ```
 
 4. **Environment Variables**:

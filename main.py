@@ -5,9 +5,9 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
 from fastapi.middleware.cors import CORSMiddleware
+from agent.graph import agent_graph
+from agent.state import AgentState
 
 load_dotenv()
 
@@ -25,30 +25,6 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# ---------------------------------------------------------
-# 1. Define the Tool for the AI
-# ---------------------------------------------------------
-@tool
-def check_security_group_port(security_group_id: str, port: int) -> str:
-    """
-    Checks if a specific port is open to the world (0.0.0.0/0) on a given AWS Security Group.
-    """
-    print(f"--> [TOOL EXECUTED] AI is checking {security_group_id} for port {port}...")
-    
-    if security_group_id == "sg-12345" or "sg-0123456789abcdef0" in security_group_id and port == 22:
-        return "CRITICAL: Port 22 is open to 0.0.0.0/0. Immediate remediation required."
-    
-    return f"Port {port} is secure on {security_group_id}."
-
-# ---------------------------------------------------------
-# 2. Initialize the AI Model and bind the tool
-# ---------------------------------------------------------
-llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash")
-llm_with_tools = llm.bind_tools([check_security_group_port])
-
-# ---------------------------------------------------------
-# 3. FastAPI Routes
-# ---------------------------------------------------------
 class SecurityAlert(BaseModel):
     event_type: str
     event_name: str
@@ -59,72 +35,73 @@ class SecurityAlert(BaseModel):
 
 @app.get("/")
 async def health_check():
-    return {"status": "Active", "agent": "DevSecOps AI Engine"}
+    return {"status": "Active", "agent": "DevSecOps AI Engine (LangGraph Powered)"}
 
 @app.post("/webhook/aws-alert")
 async def process_security_alert(alert: SecurityAlert):
-    prompt = f"""
-    You are an autonomous DevSecOps AI agent. 
-    An alert was triggered: '{alert.event_name}' on resource '{alert.resource_id}'.
-    Analyze this alert and use your tools to investigate the security configuration.
-    """
+    initial_state: AgentState = {
+        "alert_event_type": alert.event_type,
+        "alert_event_name": alert.event_name,
+        "alert_resource_id": alert.resource_id,
+        "alert_severity": alert.severity,
+        "alert_details": alert.details,
+        "retry_count": 0,
+        "messages": [],
+        "threat_classification": None,
+        "threat_score": None,
+        "remediation_script": None,
+        "remediation_valid": None,
+        "execution_status": None,
+        "execution_output": None
+    }
     
-    response = llm_with_tools.invoke(prompt)
-    tool_calls = response.tool_calls
+    # Invoke the LangGraph state machine
+    final_state = await agent_graph.ainvoke(initial_state)
 
     return {
-        "status": "alert_received",
-        "received_data": alert.details,
-        "agent_thought": "Investigating unauthorized port exposure on " + alert.resource_id
+        "status": "analyzed",
+        "threat": final_state.get("threat_classification"),
+        "remediation": final_state.get("remediation_script"),
+        "execution": final_state.get("execution_status")
     }
 
-# ---------------------------------------------------------
-# 4. Server-Sent Events (SSE) Async Stream Generator
-# ---------------------------------------------------------
 async def stream_agent_reasoning(alert: SecurityAlert):
-    prompt = f"""
-    You are an autonomous DevSecOps AI agent. 
-    An alert was triggered: '{alert.event_name}' on resource '{alert.resource_id}'.
-    Analyze this alert and use your tools to investigate the security configuration.
-    Details: {alert.details}
-    """
-    
-    yield f"data: {json.dumps({'type': 'status', 'content': 'Ingested alert. Initializing AI reasoning engine...'})}\n\n"
+    initial_state: AgentState = {
+        "alert_event_type": alert.event_type,
+        "alert_event_name": alert.event_name,
+        "alert_resource_id": alert.resource_id,
+        "alert_severity": alert.severity,
+        "alert_details": alert.details,
+        "retry_count": 0,
+        "messages": [],
+        "threat_classification": None,
+        "threat_score": None,
+        "remediation_script": None,
+        "remediation_valid": None,
+        "execution_status": None,
+        "execution_output": None
+    }
+
+    yield f"data: {json.dumps({'type': 'status', 'content': 'Ingested alert. Initializing LangGraph reasoning engine...'})}\n\n"
     await asyncio.sleep(0.3)
 
-    yield f"data: {json.dumps({'type': 'thought', 'content': f'[ALERT ANALYZER] Evaluating {alert.event_type} on {alert.resource_id} (Severity: {alert.severity})\n'})}\n\n"
-    await asyncio.sleep(0.3)
-
-    tool_result = check_security_group_port.invoke({"security_group_id": alert.resource_id, "port": 22})
-    yield f"data: {json.dumps({'type': 'thought', 'content': f'[TOOL EXECUTED] check_security_group_port: {tool_result}\n'})}\n\n"
-    await asyncio.sleep(0.3)
-
-    if os.getenv("GOOGLE_API_KEY"):
-        try:
-            async for chunk in llm_with_tools.astream(prompt):
-                if chunk.content:
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk.content})}\n\n"
-                    await asyncio.sleep(0.03)
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'thought', 'content': f'\n[FALLBACK ENGINE] Streaming reasoning for alert details: {alert.details}\n'})}\n\n"
-            summary_text = (
-                "Analysis Summary: The security group contains an ingress rule permitting SSH (Port 22) traffic from 0.0.0.0/0. "
-                "This violates enterprise security policy SEC-POL-04. Immediate remediation required. "
-                "Recommendation: Remove ingress rule and restrict to authorized IP ranges."
-            )
-            for char in summary_text:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': char})}\n\n"
-                await asyncio.sleep(0.015)
-    else:
-        summary_text = (
-            "Analysis Summary: The security group contains an ingress rule permitting SSH (Port 22) traffic from 0.0.0.0/0. "
-            "This violates enterprise security policy SEC-POL-04. Immediate remediation required. "
-            "Recommendation: Remove ingress rule and restrict to authorized IP ranges."
-        )
-        for char in summary_text:
-            yield f"data: {json.dumps({'type': 'chunk', 'content': char})}\n\n"
-            await asyncio.sleep(0.015)
-
+    # Stream graph events
+    async for event in agent_graph.astream_events(initial_state, version="v2"):
+        kind = event["event"]
+        name = event["name"]
+        
+        # When a node finishes, we can yield its state updates
+        if kind == "on_chain_end" and name in ["analyze_alert", "plan_remediation", "execute_remediation"]:
+            output = event["data"].get("output", {})
+            if output:
+                node_summary = f"[NODE EXECUTED: {name}]\n"
+                for key, val in output.items():
+                    if key != "messages":
+                        node_summary += f"{key}: {val}\n"
+                
+                yield f"data: {json.dumps({'type': 'thought', 'content': node_summary})}\n\n"
+                await asyncio.sleep(0.3)
+                
     yield f"data: {json.dumps({'type': 'done', 'content': '\n[STREAM COMPLETE] Awaiting human approval for remediation execution.'})}\n\n"
 
 @app.post("/webhook/aws-alert/stream")
