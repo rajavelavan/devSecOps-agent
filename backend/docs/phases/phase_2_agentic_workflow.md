@@ -19,6 +19,10 @@ This phase transitions the system from a basic chatbot to a robust, autonomous a
 ## Day 11 (Sprint 11): Enterprise Ingestion (EventBridge + SQS)
 * **Purpose:** Move from synchronous REST webhooks to asynchronous enterprise messaging.
 * **What we are doing:** Defining exact JSON schemas for AWS Security Hub and architecting a background polling worker in FastAPI to consume SQS messages.
+* **Implementation Details:** 
+  * `EventBridgeEvent` and `AwsSecurityHubFinding` Pydantic schemas created.
+  * `sqs_polling_worker` implemented in FastAPI `lifespan` context.
+  * Simulated local SQS queue via `asyncio.Queue` and `/mock/sqs/push` ingestion endpoint.
 
 ## Day 12 (Sprint 12): Least-Privilege Execution Layer
 * **Purpose:** Safely execute the dynamically generated Boto3 script.
